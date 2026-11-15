@@ -9,6 +9,13 @@ const BN = ['Robo-Pepe', 'Churri-Bot', 'Doña Turbo', 'Kevin404', 'Paco Prisas',
 const rooms = {};
 const rnd = (a, b) => a + Math.random() * (b - a), cl = (v, a, b) => Math.max(a, Math.min(b, v));
 const pub = p => ({ id: p.id, n: p.n, av: p.av });
+const cleanName = v => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 14);
+const lobbyPkt = r => {
+  const hs = Object.values(r.players).filter(p => !p.bot);
+  return { l: r.lobbyEnd ? Math.max(0, Math.ceil((r.lobbyEnd - Date.now()) / 1000)) : null, ps: hs.map(pub),
+    karts: [0, 1, 2, 3, 4, 5, 6, 7].map(a => { const q = hs.find(p => p.av === a); return q ? { id: q.id, n: q.n || 'Jugador' } : null; }) };
+};
+const emitLobby = r => r.state === 'lobby' && io.to(r.id).emit('lobby', lobbyPkt(r));
 const getRoom = id => rooms[id] || (rooms[id] = { id, players: {}, screens: new Set(), state: 'lobby', lobbyEnd: null, replay: false, t: 0, obs: [], items: [], res: null, endAt: 0 });
 const ev = (r, k, id, x) => io.to(r.id).emit('ev', Object.assign({ k, id }, x));
 const newP = (id, n, av, bot) => ({ id, n, av, bot, x: 300, y: 0, z: 0, vz: 0, v: 0, stun: 0, boost: 0, rocket: 0, stick: 0, imm: 0, mud: 0, item: null, fin: null, sk: bot ? rnd(.9, 1.04) : 1, in: { dx: 0, dy: 0, j: 0, u: 0 } });
@@ -34,8 +41,11 @@ function resetLobby(r) {
 }
 function startRace(r) {
   r.state = 'race'; r.t = -3.5; r.endAt = 0; r.obs = makeTrack(); r.items = []; r.res = null;
-  let n = Object.keys(r.players).length, b = 0;
-  while (n < 8) { const id = 'bot' + b; r.players[id] = newP(id, BN[b % BN.length], Math.random() * 8 | 0, true); b++; n++; }
+  // Karts sin reclamar: primero para humanos sin kart, el resto son bots
+  const hs = Object.values(r.players), free = [0, 1, 2, 3, 4, 5, 6, 7].filter(a => !hs.some(p => p.av === a));
+  hs.forEach(p => { if (!p.n) p.n = 'Corredor'; if (p.av == null) p.av = free.length ? free.shift() : Math.random() * 8 | 0; });
+  let n = hs.length, b = 0;
+  while (n < 8) { const id = 'bot' + b; r.players[id] = newP(id, BN[b % BN.length], free.length ? free.shift() : Math.random() * 8 | 0, true); b++; n++; }
   Object.values(r.players).forEach((p, k) => Object.assign(p, { x: 55 + (k % 8) * 70, y: -Math.floor(k / 8) * 40, v: 0, z: 0, vz: 0, stun: 0, boost: 0, rocket: 0, stick: 0, imm: 0, mud: 0, fin: null, item: null }));
   io.to(r.id).emit('race', racePkt(r));
 }
@@ -141,8 +151,9 @@ setInterval(() => {
     const r = rooms[id], hs = Object.values(r.players).filter(p => !p.bot);
     if (!hs.length && !r.screens.size) { delete rooms[id]; continue; }
     if (r.state === 'lobby') {
+      if (!hs.length) r.lobbyEnd = null;
       if (r.lobbyEnd && hs.length && Date.now() >= r.lobbyEnd) startRace(r);
-      else if (tk % 15 === 0) io.to(id).emit('lobby', { l: r.lobbyEnd ? Math.max(0, Math.ceil((r.lobbyEnd - Date.now()) / 1000)) : null, ps: hs.map(pub) });
+      else if (tk % 15 === 0) io.to(id).emit('lobby', lobbyPkt(r));
     } else if (r.state === 'race') {
       step(r); if (tk % 2 === 0) io.to(id).emit('s', pkt(r));
       const all = Object.values(r.players), done = (hs.length ? hs : all).every(p => p.fin !== null);
@@ -155,23 +166,37 @@ setInterval(() => {
 io.on('connection', s => {
   let room = null, screenRoom = null;
   const leave = () => {
-    if (room) { delete room.players[s.id]; s.leave(room.id); room = null; }
+    if (room) { const r0 = room; delete r0.players[s.id]; s.leave(r0.id); room = null; emitLobby(r0); }
     if (screenRoom) { screenRoom.screens.delete(s.id); s.leave(screenRoom.id); screenRoom = null; }
   };
   s.on('join', d => {
     d = d || {}; leave();
     const r = getRoom(String(d.sala || 'publica').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'publica');
     if (r.state === 'done') resetLobby(r);
+    if (r.state === 'lobby' && Object.values(r.players).filter(q => !q.bot).length >= 8) return s.emit('full');
     room = r; s.join(r.id);
-    const p = newP(s.id, String(d.n || 'Corredor').slice(0, 14), cl(parseInt(d.av) || 0, 0, 7), false);
+    const p = newP(s.id, cleanName(d.n), null, false);
     r.players[s.id] = p;
-    if (r.state === 'lobby') { if (!r.lobbyEnd) r.lobbyEnd = Date.now() + (r.replay ? 10000 : 30000); }
-    else { p.x = rnd(60, 540); s.emit('race', racePkt(r)); io.to(r.id).emit('roster', [pub(p)]); }
+    if (r.state === 'lobby') { if (!r.lobbyEnd) r.lobbyEnd = Date.now() + (r.replay ? 10000 : 30000); emitLobby(r); }
+    else {
+      const used = Object.values(r.players).filter(q => q !== p).map(q => q.av), free = [0, 1, 2, 3, 4, 5, 6, 7].filter(a => !used.includes(a));
+      p.n = p.n || 'Corredor'; p.av = free.length ? free[Math.random() * free.length | 0] : Math.random() * 8 | 0;
+      p.x = rnd(60, 540); s.emit('race', racePkt(r)); io.to(r.id).emit('roster', [pub(p)]);
+    }
   });
   s.on('screen', d => {
     leave(); const r = getRoom(String((d && d.sala) || 'publica').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'publica');
     screenRoom = r; r.screens.add(s.id); s.join(r.id);
     if (r.state === 'race') s.emit('race', racePkt(r)); else if (r.state === 'done') s.emit('end', r.res);
+  });
+  s.on('name', d => { const p = room && room.state === 'lobby' && room.players[s.id]; if (p && d) { p.n = cleanName(d.n); emitLobby(room); } });
+  s.on('claim', d => {
+    const p = room && room.state === 'lobby' && room.players[s.id]; if (!p || !d) return;
+    const a = parseInt(d.av); if (!(a >= 0 && a < 8)) return;
+    if (d.n !== undefined) p.n = cleanName(d.n);
+    if (!p.n) return emitLobby(room);                       // hace falta nombre antes de reclamar
+    if (!Object.values(room.players).some(q => q !== p && q.av === a)) p.av = a; // si otro ya lo tiene, no cambia
+    emitLobby(room);
   });
   s.on('start', () => { if (room && room.state === 'lobby' && room.players[s.id]) startRace(room); });
   s.on('i', d => { const p = room && room.players[s.id]; if (p && d) { p.in.dx = cl(+d.dx || 0, -1, 1); p.in.dy = cl(+d.dy || 0, -1, 1); } });
