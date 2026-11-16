@@ -3,7 +3,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>GRAN CARRERA LOCA · FerLudu</title>
 <style>
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;touch-action:none}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+html,body{touch-action:none;-webkit-user-select:none;user-select:none;overscroll-behavior:none;position:fixed;inset:0;width:100%;height:100%;overflow:hidden}
+#cv{touch-action:none;-webkit-user-select:none;user-select:none}
+input{-webkit-user-select:text}
 body{margin:0;overflow:hidden;background:#222;font-family:Impact,'Arial Black',sans-serif;color:#fff}
 #cv{position:fixed;inset:0;width:100%;height:100%}
 .scr{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px}
@@ -51,6 +54,12 @@ input{font:inherit;font-size:22px;padding:10px;border-radius:12px;border:3px sol
 .av.mine{border-color:#ffe135;background:#ffe13533}.av.mine i{color:#ffe135}
 #nm.err{border-color:#e22;animation:shk .3s}@keyframes shk{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 #lmsg{min-height:18px;color:#ffab91;font-size:14px}#cdw{font-size:20px}#cd{font-size:56px;color:#ffe135;text-shadow:3px 3px 0 #000;vertical-align:middle}
+#ctl{align-items:flex-end;gap:12px}
+#lr,#rb{display:flex;gap:16px}#rb{gap:22px}
+#lr .btn{width:min(24vw,118px);height:min(24vw,118px);padding:0;font-size:46px;background:#455a64;border-radius:50%;touch-action:none;line-height:1}
+#lr .btn.on{background:#90a4ae;transform:translateY(5px);box-shadow:0 1px 0 #000}
+#rb .btn{margin:0;min-width:min(28vw,150px);height:min(24vw,118px);padding:0 .5em;font-size:22px;line-height:1.1;touch-action:none}
+@media(max-height:480px){#lr .btn,#rb .btn{height:min(30vh,100px)}#lr .btn{width:min(30vh,100px)}}
 </style></head><body>
 <canvas id="cv"></canvas><canvas id="cf" hidden></canvas>
 <button id="mute">🔊</button>
@@ -71,7 +80,7 @@ input{font:inherit;font-size:22px;padding:10px;border-radius:12px;border:3px sol
 </div></div>
 <div id="race" class="scr" hidden>
   <div id="hud"><span id="pos"></span><span id="tm"></span></div><div id="feed"></div><div id="big"></div>
-  <div id="ctl"><div id="joy"><i id="knob"></i></div><div><button id="useb" class="btn">❔ LANZAR</button><button id="jmp" class="btn">SALTAR</button></div></div>
+  <div id="ctl"><div id="lr"><button id="bl" class="btn">◀</button><button id="br" class="btn">▶</button></div><div id="joy" hidden><i id="knob"></i></div><div id="rb"><button id="useb" class="btn">❔ LANZAR</button><button id="jmp" class="btn">SALTAR</button></div></div>
 </div>
 <div id="podium" class="scr" hidden>
   <h1 style="font-size:min(10vw,70px)">¡PODIO!</h1><div id="pod"></div><div id="rest" style="font-size:15px;max-width:600px"></div>
@@ -241,7 +250,22 @@ const jump=()=>{if(mode==='race')sock.emit('j')},useIt=()=>{if(mode==='race')soc
 $('jmp').onpointerdown=jump;$('useb').onpointerdown=useIt;
 addEventListener('keydown',e=>{const k=e.key.length>1?e.key:e.key.toLowerCase();if(k===' '&&!e.repeat)jump();if(k==='e'&&!e.repeat)useIt();if(mode==='race'&&(k.startsWith('Arrow')||k===' '))e.preventDefault();keys[k]=1});
 addEventListener('keyup',e=>delete keys[e.key.length>1?e.key:e.key.toLowerCase()]);
-setInterval(()=>{if(mode!=='race')return;let dx=(keys.ArrowRight||keys.d?1:0)-(keys.ArrowLeft||keys.a?1:0)||jx,dy=(keys.ArrowUp||keys.w?1:0)-(keys.ArrowDown||keys.s?1:0)||jy;dx=+dx.toFixed(2);dy=+dy.toFixed(2);const k=dx+','+dy;if(k!==last){last=k;sock.emit('i',{dx,dy})}},50);
+let bl=0,br=0,sw=0,kx=0,tid=null,tx=null;
+const hold=(el,set)=>{const on=e=>{e.preventDefault();set(1);el.classList.add('on');sendIn()},off=e=>{e.preventDefault();set(0);el.classList.remove('on');sendIn()};
+ el.addEventListener('touchstart',on,{passive:false});el.addEventListener('touchend',off,{passive:false});el.addEventListener('touchcancel',off,{passive:false});
+ el.addEventListener('mousedown',on);addEventListener('mouseup',()=>{if(el.classList.contains('on'))off({preventDefault(){}})})};
+hold($('bl'),v=>{bl=v});hold($('br'),v=>{br=v});
+cv.addEventListener('touchstart',e=>{if(mode!=='race')return;e.preventDefault();if(tid===null){const t=e.changedTouches[0];tid=t.identifier;tx=t.clientX;sendIn()}},{passive:false});
+cv.addEventListener('touchmove',e=>{if(mode!=='race')return;e.preventDefault();for(const t of e.changedTouches)if(t.identifier===tid)tx=t.clientX},{passive:false});
+const tend=e=>{for(const t of e.changedTouches)if(t.identifier===tid){tid=null;tx=null}};
+cv.addEventListener('touchend',tend);cv.addEventListener('touchcancel',tend);
+document.addEventListener('touchmove',e=>{if(mode==='race')e.preventDefault()},{passive:false});
+addEventListener('gesturestart',e=>e.preventDefault());addEventListener('contextmenu',e=>{if(mode==='race')e.preventDefault()});
+function sendIn(){if(mode!=='race')return;
+ sw=tx===null?0:Math.abs(tx-kx)<10?0:Math.max(-1,Math.min(1,(tx-kx)/(W*.07)));
+ let dx=(br-bl)||(keys.ArrowRight||keys.d?1:0)-(keys.ArrowLeft||keys.a?1:0)||sw||jx,dy=(keys.ArrowUp||keys.w?1:0)-(keys.ArrowDown||keys.s?1:0)||jy;
+ dx=+dx.toFixed(2);dy=+dy.toFixed(2);const k=dx+','+dy;if(k!==last){last=k;sock.emit('i',{dx,dy})}}
+setInterval(sendIn,30);
 
 /* ---------- DIBUJO: PORTADA (estilo Mario Kart) ---------- */
 function banana(c,x,y,r,rot){c.save();c.translate(x,y);c.rotate(rot);c.scale(r/12,r/12);c.fillStyle='#ffe135';c.strokeStyle='#8a6d00';c.lineWidth=1.6;c.beginPath();c.moveTo(-12,-6);c.quadraticCurveTo(-4,14,13,-9);c.quadraticCurveTo(14,-12,11,-12);c.quadraticCurveTo(0,6,-10,-10);c.quadraticCurveTo(-13,-10,-12,-6);c.closePath();c.fill();c.stroke();c.fillStyle='#5d4037';c.fillRect(11,-13,3,4);c.restore()}
@@ -281,7 +305,7 @@ function drawPan(tm){const c=cx,x0=90,x1=W-110,ty=H*.2,th=H*.5,X=y=>x0+Math.max(
 
 /* ---------- DIBUJO: CARRERA 2.5D ---------- */
 function drawRace(tm){const c=cx;if(!st)return;const me=disp[sock.id];if(!me)return;const camY=me.y;
- c.save();if(shake>0){c.translate((Math.random()-.5)*shake*30,(Math.random()-.5)*shake*30);shake=Math.max(0,shake-.016)}
+ if(me.b)shake=Math.max(shake,.1);c.save();if(shake>0){c.translate((Math.random()-.5)*shake*30,(Math.random()-.5)*shake*30);shake=Math.max(0,shake-.016)}
  const D=57,hy=H*.3,py=H*.8,XS=Math.min(W*.92,H*1.15)/600,camX=300+(me.x-300)*.55,P=(x,y)=>{const s=D/Math.max(y-camY+D,D*.25);return[W/2+(x-camX)*s*XS,hy+(py-hy)*s,s]};
  let g=c.createLinearGradient(0,0,0,hy);g.addColorStop(0,'#4aa8ff');g.addColorStop(1,'#cdeeff');c.fillStyle=g;c.fillRect(-30,-30,W+60,hy+30);{const off=-camY*.03-(me.x-300)*.05;
   c.fillStyle='#fff';c.globalAlpha=.92;for(let i=0;i<7;i++){const cxp=(((i*W/6+tm*14*(1+i%3*.4)+off*2)%(W+240))+W+240)%(W+240)-120,cy=hy*(.15+.55*((i*37)%10)/10),r=H*.035*(1+(i%3)*.35);for(const[dx,dy,k]of[[-1.3,.3,.8],[0,0,1.1],[1.3,.25,.9],[.6,.6,.7]]){c.beginPath();c.arc(cxp+dx*r,cy+dy*r,r*k,0,7);c.fill()}}c.globalAlpha=1;
@@ -290,6 +314,7 @@ function drawRace(tm){const c=cx;if(!st)return;const me=disp[sock.id];if(!me)ret
  const quad=(x0,y0,x1,y1,col)=>{const a=P(x0,y1),b=P(x1,y1),d=P(x0,y0),e=P(x1,y0);c.fillStyle=col;c.beginPath();c.moveTo(a[0],a[1]);c.lineTo(b[0],b[1]);c.lineTo(e[0],e[1]);c.lineTo(d[0],d[1]);c.fill()};
  for(let y0=Math.floor((camY-40)/40)*40;y0<camY+2600;y0+=40){if(y0<-80||y0>TRACK+120)continue;const e=(y0/40)&1;quad(0,y0,600,y0+40,e?'#d7b98e':'#cfae80');quad(-30,y0,0,y0+40,e?'#e53935':'#fff');quad(600,y0,630,y0+40,e?'#e53935':'#fff');quad(-1400,y0,-30,y0+40,e?'#3f9b45':'#4aae50');quad(630,y0,2030,y0+40,e?'#3f9b45':'#4aae50');if(e)for(let k=1;k<5;k++)quad(k*120-3,y0,k*120+3,y0+40,'#fff9')}
  for(const Y0 of [0,TRACK])for(let i=0;i<12;i++){quad(i*50,Y0,i*50+50,Y0+16,i%2?'#000':'#fff');quad(i*50,Y0+16,i*50+50,Y0+32,i%2?'#fff':'#000')}
+ kx=W/2+(me.x-camX)*XS;
  const poly=(pts,col)=>{c.fillStyle=col;c.beginPath();pts.forEach((p,i)=>{const q=P(p[0],p[1]);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1])});c.closePath();c.fill()},
  wq=(x0,y0,x1,y1,col)=>poly([[x0,y0],[x1,y0],[x1,y1],[x0,y1]],col),
  blob=(cx0,cy0,rx,ry,col)=>poly(Array.from({length:18},(_,i)=>[cx0+Math.cos(i*Math.PI/9)*rx,cy0+Math.sin(i*Math.PI/9)*ry]),col);
@@ -326,7 +351,7 @@ function drawRace(tm){const c=cx;if(!st)return;const me=disp[sock.id];if(!me)ret
    if(d.i){c.font=`${w*.3}px serif`;c.fillText(EM[d.i],sx+w*.5,ny-w*.05)}}}})}
  E.sort((a,b)=>b.y-a.y).forEach(e=>{try{e.f()}catch(_){}});
  /* ===== LÍNEAS BLANCAS DE VELOCIDAD en los bordes de la pantalla ===== */
- {const sp=me.sp||0,it=Math.min(1,Math.max(me.b?1:0,(sp-60)/40));
+ {const sp=me.sp||0,it=Math.min(1,Math.max(me.b?1:0,(sp-100)/140));
   if(it>.02){c.save();c.strokeStyle='#fff';c.lineCap='round';const vx=W/2,vy=hy;
    for(let i=0;i<40;i++){const left=i%2===0,ex=left?rn(i*5.3)*W*.17:W-rn(i*5.3)*W*.17,ey=H*.12+rn(i*2.9)*H*.85,dx=ex-vx,dy=ey-vy,u=((tm*(1.8+rn(i)*1.6)+rn(i*7))%1),b=.85+.5*u,ln=(.05+.12*it)*(1+u);
     c.globalAlpha=it*.7*(.3+.7*Math.sin(u*Math.PI));c.lineWidth=1.5+3*u;c.beginPath();c.moveTo(vx+dx*b,vy+dy*b);c.lineTo(vx+dx*(b+ln),vy+dy*(b+ln));c.stroke()}
