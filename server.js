@@ -3,7 +3,7 @@ const express = require('express'), http = require('http'), { Server } = require
 const app = express(), srv = http.createServer(app), io = new Server(srv);
 app.use(express.static(__dirname + '/public'));
 
-const TRACK = 7200, HZ = 30, DT = 1 / HZ, MAXV = 104; // 7200 / 104 ≈ 69 s a tope; con barro/vallas ≈ 75-85 s
+const TRACK = 11500, HZ = 30, DT = 1 / HZ, MAXV = 187; // velocidad base +80% (104→187); 11500 / 187 ≈ 61 s a tope; con barro/vallas/golpes ≈ 65-75 s
 const ITEMS = ['banana', 'ball', 'sofa', 'stickers', 'rocket', 'magnet'];
 const BN = ['Robo-Pepe', 'Churri-Bot', 'Doña Turbo', 'Kevin404', 'Paco Prisas', 'Bot-ella', 'Míster Chispas', 'Lola Rayo'];
 const rooms = {};
@@ -24,14 +24,14 @@ const lobbyEmit = r => io.to(r.id).emit('lobby', lobbyPkt(r));
 
 function makeTrack() {
   const o = [];
-  for (let y = 700; y < TRACK - 500; y += rnd(110, 180)) {
+  for (let y = 1260; y < TRACK - 900; y += rnd(200, 325)) {
     const q = Math.random(), x = rnd(70, 530);
     if (q < .3) o.push({ t: 'mud', x, y, w: 130, h: 90 });
     else if (q < .6) o.push({ t: 'hurdle', x: rnd(130, 470), y, w: 200, h: 16 });
     else if (q < .8) o.push({ t: 'turbo', x, y, w: 80, h: 60 });
     else o.push({ t: 'tramp', x, y, w: 90, h: 46 });
   }
-  for (let y = 1000; y < TRACK - 600; y += 860) [130, 300, 470].forEach(x => o.push({ t: 'box', x, y, w: 40, h: 40, cd: {} }));
+  for (let y = 1800; y < TRACK - 1080; y += 1550) [130, 300, 470].forEach(x => o.push({ t: 'box', x, y, w: 40, h: 40, cd: {} }));
   return o;
 }
 const stat = r => r.obs.filter(o => o.t !== 'sofa').map(o => ({ t: o.t, x: o.x, y: o.y, w: o.w, h: o.h }));
@@ -64,8 +64,8 @@ function use(r, p) {
   const ahead = ps.filter(q => q.y > p.y).sort((a, b) => a.y - b.y)[0];
   if (k === 'banana') { r.items.push({ k, x: p.x, y: p.y - 35, own: p.id, born: r.t }); ev(r, 'drop', p.id); }
   else if (k === 'ball') { r.items.push({ k, x: p.x, y: p.y + 30, own: p.id, tgt: ahead && ahead.id, born: r.t }); ev(r, 'ball', p.id); }
-  else if (k === 'sofa') { const L = ps.sort((a, b) => b.y - a.y)[0] || p; r.obs.push({ t: 'sofa', x: cl(L.x, 150, 450), y: L.y + 240, w: 300, h: 50, born: r.t, ttl: r.t + 7 }); ev(r, 'sofa', p.id); }
-  else if (k === 'stickers') { const ids = []; ps.forEach(q => { if (Math.abs(q.y - p.y) < 760) { q.stick = 3; ids.push(q.id); } }); ev(r, 'stick', p.id, { ids }); }
+  else if (k === 'sofa') { const L = ps.sort((a, b) => b.y - a.y)[0] || p; r.obs.push({ t: 'sofa', x: cl(L.x, 150, 450), y: L.y + 432, w: 300, h: 50, born: r.t, ttl: r.t + 7 }); ev(r, 'sofa', p.id); }
+  else if (k === 'stickers') { const ids = []; ps.forEach(q => { if (Math.abs(q.y - p.y) < 1370) { q.stick = 3; ids.push(q.id); } }); ev(r, 'stick', p.id, { ids }); }
   else if (k === 'rocket') { p.rocket = 3; p.stun = 0; ev(r, 'rocket', p.id); }
   else if (k === 'magnet') {
     if (ahead) { [p.x, ahead.x] = [ahead.x, p.x]; [p.y, ahead.y] = [ahead.y, p.y]; ahead.stun = .7; ahead.v = 0; ev(r, 'magnet', p.id, { to: ahead.id }); }
@@ -76,13 +76,13 @@ function use(r, p) {
 function bot(r, p) {
   const I = p.in; I.dx = 0; I.dy = .4; let hz = null, bx = null;
   for (const o of r.obs) {
-    const d = o.y - p.y; if (d < -5 || d > 300) continue;
+    const d = o.y - p.y; if (d < -5 || d > 540) continue;
     if (o.t === 'box') { if (!p.item && (o.cd[p.id] || 0) < r.t && Math.abs(o.x - p.x) < 160 && (!bx || d < bx.y - p.y)) bx = o; }
     else if (['hurdle', 'mud', 'sofa'].includes(o.t) && Math.abs(o.x - p.x) < o.w / 2 + 22 && (!hz || d < hz.y - p.y)) hz = o;
   }
   if (hz) {
     const d = hz.y - p.y;
-    if (hz.t === 'hurdle' && d < 110) { if (p.z === 0 && Math.random() < .85) I.j = 1; }
+    if (hz.t === 'hurdle' && d < 198) { if (p.z === 0 && Math.random() < .85) I.j = 1; }
     else I.dx = (p.x >= hz.x ? 1 : -1) * (Math.random() < .97 ? 1 : 0);
   } else if (bx) I.dx = cl((bx.x - p.x) / 20, -1, 1);
   if (p.item && Math.random() < .025) I.u = 1;
@@ -100,9 +100,9 @@ function step(r) {
     if (I.u) { use(r, p); I.u = 0; }
     if (I.j) { if (p.z === 0 && p.stun <= 0) { p.vz = 17; p.z = .01; ev(r, 'jump', p.id); } I.j = 0; }
     let tv = MAXV * p.sk * (1 + .18 * I.dy);
-    if (p.mud > 0) tv *= .45; if (p.boost > 0) tv = 190; if (p.rocket > 0) tv = 210; if (p.stun > 0) tv = 0;
+    if (p.mud > 0) tv *= .45; if (p.boost > 0) tv = 342; if (p.rocket > 0) tv = 378; if (p.stun > 0) tv = 0;
     p.v += (tv - p.v) * Math.min(1, (p.stun > 0 ? 9 : 3) * DT); p.y += p.v * DT;
-    if (p.stun <= 0) p.x += I.dx * 170 * DT * (p.rocket > 0 ? .6 : 1);
+    if (p.stun <= 0) p.x += I.dx * 306 * DT * (p.rocket > 0 ? .6 : 1);
     p.x = cl(p.x, 25, 575);
     for (const o of r.obs) {
       if (Math.abs(p.x - o.x) > o.w / 2 + 10 || Math.abs(p.y - o.y) > o.h / 2 + 8) continue;
@@ -127,7 +127,7 @@ function step(r) {
       return true;
     }
     if (age > 4) return false;
-    it.y += 350 * DT; const t = r.players[it.tgt]; if (t) it.x += cl(t.x - it.x, -260 * DT, 260 * DT);
+    it.y += 630 * DT; const t = r.players[it.tgt]; if (t) it.x += cl(t.x - it.x, -468 * DT, 468 * DT);
     for (const p of ps) {
       if (p.id === it.own || p.fin !== null || p.z > 3) continue;
       if (Math.abs(p.x - it.x) < 24 && Math.abs(p.y - it.y) < 24) { p.stun = 1.6; p.imm = 2; p.v = 0; p.vz = 24; p.z = .01; ev(r, 'boom', p.id); return false; }
@@ -155,7 +155,7 @@ setInterval(() => {
       if (r.lobbyEnd && hs.length && Date.now() >= r.lobbyEnd) startRace(r);
       else if (tk % 15 === 0) lobbyEmit(r);
     } else if (r.state === 'race') {
-      step(r); if (tk % 2 === 0) io.to(id).emit('s', pkt(r));
+      step(r); io.to(id).emit('s', pkt(r)); // 30 Hz: más suave a esta velocidad
       const all = Object.values(r.players), done = (hs.length ? hs : all).every(p => p.fin !== null);
       if (done && !r.endAt) r.endAt = r.t + 3;
       if (r.t >= 140 || (r.endAt && r.t >= r.endAt)) endRace(r);
