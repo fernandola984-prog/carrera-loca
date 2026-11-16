@@ -3,15 +3,24 @@ const express = require('express'), http = require('http'), { Server } = require
 const app = express(), srv = http.createServer(app), io = new Server(srv);
 app.use(express.static(__dirname + '/public'));
 
-const TRACK = 8800, HZ = 30, DT = 1 / HZ, MAXV = 104;
+const TRACK = 7200, HZ = 30, DT = 1 / HZ, MAXV = 104; // 7200 / 104 ≈ 69 s a tope; con barro/vallas ≈ 75-85 s
 const ITEMS = ['banana', 'ball', 'sofa', 'stickers', 'rocket', 'magnet'];
-const BN = ['Robo-Pepe', 'Churri-Bot', 'Doña Turbo', 'Kevin404', 'Paco Prisas', 'Bot-ella', 'Míster Chispas', 'Lola Rayo', 'Tío Cohete', 'Super Nacho'];
+const BN = ['Robo-Pepe', 'Churri-Bot', 'Doña Turbo', 'Kevin404', 'Paco Prisas', 'Bot-ella', 'Míster Chispas', 'Lola Rayo'];
 const rooms = {};
 const rnd = (a, b) => a + Math.random() * (b - a), cl = (v, a, b) => Math.max(a, Math.min(b, v));
 const pub = p => ({ id: p.id, n: p.n, av: p.av });
+const rid = s => String(s || 'publica').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'publica';
 const getRoom = id => rooms[id] || (rooms[id] = { id, players: {}, screens: new Set(), state: 'lobby', lobbyEnd: null, replay: false, t: 0, obs: [], items: [], res: null, endAt: 0 });
+const humans = r => Object.values(r.players).filter(p => !p.bot);
 const ev = (r, k, id, x) => io.to(r.id).emit('ev', Object.assign({ k, id }, x));
-const newP = (id, n, av, bot) => ({ id, n, av, bot, x: 300, y: 0, z: 0, vz: 0, v: 0, stun: 0, boost: 0, rocket: 0, stick: 0, imm: 0, mud: 0, item: null, fin: null, sk: bot ? rnd(.9, 1.04) : 1, in: { dx: 0, dy: 0, j: 0, u: 0 } });
+const newP = (id, n, av, bot) => ({ id, n, av, bot, x: 300, y: 0, z: 0, vz: 0, v: 0, stun: 0, boost: 0, rocket: 0, stick: 0, imm: 0, mud: 0, item: null, fin: null, sk: bot ? rnd(.92, 1.03) : 1, in: { dx: 0, dy: 0, j: 0, u: 0 } });
+
+function lobbyPkt(r) {
+  const hs = humans(r), karts = Array(8).fill(null);
+  hs.forEach(p => { if (p.av >= 0) karts[p.av] = { id: p.id, n: p.n }; });
+  return { l: r.lobbyEnd ? Math.max(0, Math.ceil((r.lobbyEnd - Date.now()) / 1000)) : null, ps: hs.map(p => ({ id: p.id, n: p.n, av: p.av < 0 ? null : p.av })), karts };
+}
+const lobbyEmit = r => io.to(r.id).emit('lobby', lobbyPkt(r));
 
 function makeTrack() {
   const o = [];
@@ -33,9 +42,11 @@ function resetLobby(r) {
   Object.assign(r, { state: 'lobby', lobbyEnd: null, replay: true, obs: [], items: [], res: null, endAt: 0 });
 }
 function startRace(r) {
+  const hs = humans(r), used = new Set(hs.map(p => p.av).filter(a => a >= 0));
+  const free = [0, 1, 2, 3, 4, 5, 6, 7].filter(k => !used.has(k));
+  hs.forEach(p => { if (p.av < 0) p.av = free.shift(); });          // sin kart elegido → primer kart libre
+  free.forEach(k => { r.players['bot' + k] = newP('bot' + k, BN[k], k, true); }); // kart libre → bot
   r.state = 'race'; r.t = -3.5; r.endAt = 0; r.obs = makeTrack(); r.items = []; r.res = null;
-  let n = Object.keys(r.players).length, b = 0;
-  while (n < 8) { const id = 'bot' + b; r.players[id] = newP(id, BN[b % BN.length], Math.random() * 8 | 0, true); b++; n++; }
   Object.values(r.players).forEach((p, k) => Object.assign(p, { x: 55 + (k % 8) * 70, y: -Math.floor(k / 8) * 40, v: 0, z: 0, vz: 0, stun: 0, boost: 0, rocket: 0, stick: 0, imm: 0, mud: 0, fin: null, item: null }));
   io.to(r.id).emit('race', racePkt(r));
 }
@@ -138,11 +149,11 @@ let tk = 0;
 setInterval(() => {
   tk++;
   for (const id in rooms) {
-    const r = rooms[id], hs = Object.values(r.players).filter(p => !p.bot);
+    const r = rooms[id], hs = humans(r);
     if (!hs.length && !r.screens.size) { delete rooms[id]; continue; }
     if (r.state === 'lobby') {
       if (r.lobbyEnd && hs.length && Date.now() >= r.lobbyEnd) startRace(r);
-      else if (tk % 15 === 0) io.to(id).emit('lobby', { l: r.lobbyEnd ? Math.max(0, Math.ceil((r.lobbyEnd - Date.now()) / 1000)) : null, ps: hs.map(pub) });
+      else if (tk % 15 === 0) lobbyEmit(r);
     } else if (r.state === 'race') {
       step(r); if (tk % 2 === 0) io.to(id).emit('s', pkt(r));
       const all = Object.values(r.players), done = (hs.length ? hs : all).every(p => p.fin !== null);
@@ -155,21 +166,33 @@ setInterval(() => {
 io.on('connection', s => {
   let room = null, screenRoom = null;
   const leave = () => {
-    if (room) { delete room.players[s.id]; s.leave(room.id); room = null; }
+    if (room) {
+      if (room.state === 'lobby') { delete room.players[s.id]; lobbyEmit(room); }
+      else { const p = room.players[s.id]; if (p) { p.bot = true; p.sk = 1; } } // si se va en carrera, su kart sigue como bot
+      s.leave(room.id); room = null;
+    }
     if (screenRoom) { screenRoom.screens.delete(s.id); s.leave(screenRoom.id); screenRoom = null; }
   };
   s.on('join', d => {
     d = d || {}; leave();
-    const r = getRoom(String(d.sala || 'publica').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'publica');
+    const r = getRoom(rid(d.sala));
     if (r.state === 'done') resetLobby(r);
+    if (r.state !== 'lobby' || humans(r).length >= 8) { s.emit('full'); return; }
     room = r; s.join(r.id);
-    const p = newP(s.id, String(d.n || 'Corredor').slice(0, 14), cl(parseInt(d.av) || 0, 0, 7), false);
-    r.players[s.id] = p;
-    if (r.state === 'lobby') { if (!r.lobbyEnd) r.lobbyEnd = Date.now() + (r.replay ? 10000 : 30000); }
-    else { p.x = rnd(60, 540); s.emit('race', racePkt(r)); io.to(r.id).emit('roster', [pub(p)]); }
+    r.players[s.id] = newP(s.id, String(d.n || 'Corredor').slice(0, 14), -1, false);
+    if (!r.lobbyEnd) r.lobbyEnd = Date.now() + (r.replay ? 10000 : 30000);
+    lobbyEmit(r);
   });
+  s.on('claim', d => {
+    const p = room && room.state === 'lobby' && room.players[s.id]; if (!p || !d) return;
+    const av = parseInt(d.av);
+    if (!(av >= 0 && av <= 7) || humans(room).some(q => q !== p && q.av === av)) { lobbyEmit(room); return; }
+    p.av = av; if (d.n) p.n = String(d.n).slice(0, 14);
+    lobbyEmit(room);
+  });
+  s.on('name', d => { const p = room && room.players[s.id]; if (p && d && d.n) { p.n = String(d.n).slice(0, 14); if (room.state === 'lobby') lobbyEmit(room); } });
   s.on('screen', d => {
-    leave(); const r = getRoom(String((d && d.sala) || 'publica').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'publica');
+    leave(); const r = getRoom(rid(d && d.sala));
     screenRoom = r; r.screens.add(s.id); s.join(r.id);
     if (r.state === 'race') s.emit('race', racePkt(r)); else if (r.state === 'done') s.emit('end', r.res);
   });
